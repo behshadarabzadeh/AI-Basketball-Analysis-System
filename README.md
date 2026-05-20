@@ -37,8 +37,27 @@ Custom basketball tracking logic is used to track multiple basketballs during dy
 ### Shot Detection
 The system identifies shot attempts during training sessions using ball trajectory and event-based analysis.
 
-### Make / Miss Classification
+
+## Make / Miss Detection — Net Motion Analysis
+
+![Net Motion Demo](screenshots/make_miss_net_motion.gif)
+
 Shot outcomes are analysed to classify made and missed shots during training activities.
+The make/miss classifier uses two independent verification signals:
+
+1. **Spatial trajectory analysis** — evaluates the ball path relative to the rim center
+2. **Net motion analysis** — measures pixel-level movement inside the net region after the ball passes the rim plane
+
+A shot is classified as **MAKE** only if both conditions are satisfied.
+
+This dual-validation approach reduces false positives that can occur in single-camera basketball analysis systems, where the ball appearing near or above the rim does not necessarily mean the shot was made.
+
+Due to camera perspective and depth limitations, trajectory-based analysis alone may incorrectly classify some shots during shooting drills and practice scenarios. To improve robustness, the system combines ball trajectory analysis with net motion verification to confirm that the ball actually passed through the basket.
+
+The system performs frame-difference motion analysis inside a dedicated net ROI (Region of Interest). The ball bounding box is excluded from the motion calculation to ensure that only net deformation contributes to the motion score.
+
+This approach has been validated through real basketball training sessions in London.
+
 
 ### Shooter Assignment
 Custom shooter assignment logic is used to associate shot attempts with the correct player in multi-player environments.
