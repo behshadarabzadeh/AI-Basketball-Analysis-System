@@ -40,7 +40,7 @@ The system identifies shot attempts during training sessions using ball trajecto
 
 ## Make / Miss Detection — Net Motion Analysis
 
-![Net Motion Demo](screenshots/make_miss_net_motion.gif)
+![Net Motion Demo](screenshots/make miss net motion.gif)
 
 Shot outcomes are analysed to classify made and missed shots during training activities.
 The make/miss classifier uses two independent verification signals:
