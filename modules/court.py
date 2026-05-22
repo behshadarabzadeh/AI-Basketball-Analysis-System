@@ -1,10 +1,15 @@
-"""
-Court zone classification and shot-chart visualisation.
+"""Court zone classification and shot-chart visualisation.
 
 All coordinates are in metres with the hoop at the origin.
+Zone labels follow the pattern {TIER}_{SECTOR}, e.g. "3PT_LEFT_WING",
+"HIGHMID_TOP", "LOWMID_CENTER". The full ordered set is defined in
+config.ZONE_ORDER.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TypedDict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,16 +41,35 @@ from .config import (
     theta_right,
 )
 
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+class Shot(TypedDict):
+    zone: str                      # e.g. "3PT_LEFT_WING" — from classify_zone()
+    result: str                    # "make" or "miss"
+    court_xy: tuple[float, float]  # metres, hoop at origin
+    shooter: str                   # player name label
+
+
+class ZoneStat(TypedDict):
+    attempts: int
+    made: int
+    pct: float | None              # None until at least one attempt is recorded
+
+
 # ---------------------------------------------------------------------------
 # Polar / angular helpers
 # ---------------------------------------------------------------------------
 
-def phi_deg(x, y):
-    """Signed angle (°) measured from the positive-Y axis toward positive-X."""
+def court_angle_deg(x: float, y: float) -> float:
+    """Return the signed angle (°) from the positive-Y axis toward positive-X."""
     return math.degrees(math.atan2(x, y))
 
 
-def sector_3(phi):
+def sector_3(phi: float) -> str:
+    """Map a polar angle (°) to a three-sector label: LEFT, CENTER, or RIGHT."""
     if phi < -TOP_3:
         return "LEFT"
     if phi > TOP_3:
@@ -53,7 +77,8 @@ def sector_3(phi):
     return "CENTER"
 
 
-def sector_5(phi):
+def sector_5(phi: float) -> str:
+    """Map a polar angle (°) to a five-sector label used for mid-range and 3PT zones."""
     if phi < -WING_5:
         return "LEFT_CORNER"
     if phi < -TOP_5:
@@ -69,8 +94,8 @@ def sector_5(phi):
 # Zone classification
 # ---------------------------------------------------------------------------
 
-def is_three_point(x, y):
-    """Return (True, area_label) if (x, y) is beyond the three-point arc."""
+def is_three_point(x: float, y: float) -> tuple[bool, str | None]:
+    """Return (True, area_label) if (x, y) is beyond the three-point arc, else (False, None)."""
     ax = abs(x)
     r = math.hypot(x, y)
 
@@ -79,23 +104,23 @@ def is_three_point(x, y):
             return True, ("LEFT_CORNER" if x < 0 else "RIGHT_CORNER")
 
     elif CORNER_3_Y_INT < y <= THREE_ARC_R * math.cos(math.radians(WING_5)):
-        phi = phi_deg(x, y)
+        phi = court_angle_deg(x, y)
         if r >= THREE_ARC_R and abs(phi) >= WING_5:
             return True, ("LEFT_CORNER" if x < 0 else "RIGHT_CORNER")
 
     if r >= THREE_ARC_R and y >= CORNER_3_Y_INT:
-        return True, sector_5(phi_deg(x, y))
+        return True, sector_5(court_angle_deg(x, y))
 
     return False, None
 
 
-def classify_zone(x, y):
+def classify_zone(x: float, y: float) -> str:
     """Return the zone label for a court position (x, y) in metres."""
     if x < -HALF_W or x > HALF_W or y < Y_MIN or y > Y_MAX:
         return "OUT_OF_BOUNDS"
 
     r = math.hypot(x, y)
-    phi = phi_deg(x, y)
+    phi = court_angle_deg(x, y)
     is3, three_area = is_three_point(x, y)
 
     if is3:
@@ -109,31 +134,43 @@ def classify_zone(x, y):
 # Shot-chart polygon helpers
 # ---------------------------------------------------------------------------
 
-def polar_to_xy(r, phi_deg_val):
+def polar_to_xy(r: float, phi_deg_val: float) -> tuple[float, float]:
+    """Convert polar (r, φ°) to Cartesian (x, y), with φ measured from the Y-axis."""
     rad = math.radians(phi_deg_val)
     return r * math.sin(rad), r * math.cos(rad)
 
 
-def arc_points(r, phi1, phi2, n=80):
+def arc_points(r: float, phi1: float, phi2: float, n: int = 80) -> list[tuple[float, float]]:
+    """Return n equally-spaced Cartesian points along an arc of radius r from φ1° to φ2°."""
     return [polar_to_xy(r, p) for p in np.linspace(phi1, phi2, n)]
 
 
-def point_on_circle_by_y(r, y, side="left"):
+def point_on_circle_by_y(r: float, y: float, side: str = "left") -> tuple[float, float]:
+    """Return the point on a circle of radius r at height y, on the left or right side."""
     x_abs = math.sqrt(max(0.0, r * r - y * y))
     return (-x_abs, y) if side == "left" else (x_abs, y)
 
 
-def corner_phi_deg():
+def corner_phi_deg() -> float:
+    """Return the polar angle (°) at which the three-point arc meets the corner straight."""
     return math.degrees(math.atan2(CORNER_3_X, CORNER_3_Y_INT))
 
 
-def annulus_sector_polygon(r_inner, r_outer, phi1, phi2, n=120):
+def annulus_sector_polygon(
+    r_inner: float,
+    r_outer: float,
+    phi1: float,
+    phi2: float,
+    n: int = 120,
+) -> list[tuple[float, float]]:
+    """Return vertices of an annular sector between r_inner and r_outer, from φ1° to φ2°."""
     outer = arc_points(r_outer, phi1, phi2, n=n)
     inner = arc_points(r_inner, phi2, phi1, n=n)
     return outer + inner
 
 
-def wedge_polygon(r, phi1, phi2, n=120):
+def wedge_polygon(r: float, phi1: float, phi2: float, n: int = 120) -> list[tuple[float, float]]:
+    """Return vertices of a wedge (pie-slice) from the origin to radius r, from φ1° to φ2°."""
     return [(0.0, 0.0)] + arc_points(r, phi1, phi2, n=n)
 
 
@@ -141,12 +178,12 @@ def wedge_polygon(r, phi1, phi2, n=120):
 # Zone polygon construction
 # ---------------------------------------------------------------------------
 
-def build_zone_polygons():
+def build_zone_polygons() -> dict[str, list[tuple[float, float]]]:
     """Return a dict mapping zone name → list of (x, y) polygon vertices."""
-    zones = {}
+    zones: dict[str, list[tuple[float, float]]] = {}
 
     c_phi = corner_phi_deg()
-    outer_cap_r = 9.6
+    outer_cap_r = 9.6  # visual boundary beyond official 3PT arc
 
     left_inner_base = point_on_circle_by_y(LOWMID_R, Y_MIN, side="left")
     right_inner_base = point_on_circle_by_y(LOWMID_R, Y_MIN, side="right")
@@ -196,14 +233,15 @@ def build_zone_polygons():
         + [(CORNER_3_X, CORNER_3_Y_INT)]
     )
 
-    zones["3PT_LEFT_WING"]  = annulus_sector_polygon(THREE_ARC_R, 9.6, -WING_5, -TOP_5, n=140)
-    zones["3PT_TOP"]        = annulus_sector_polygon(THREE_ARC_R, 9.6, -TOP_5, TOP_5, n=160)
-    zones["3PT_RIGHT_WING"] = annulus_sector_polygon(THREE_ARC_R, 9.6, TOP_5, WING_5, n=140)
+    zones["3PT_LEFT_WING"]  = annulus_sector_polygon(THREE_ARC_R, outer_cap_r, -WING_5, -TOP_5, n=140)
+    zones["3PT_TOP"]        = annulus_sector_polygon(THREE_ARC_R, outer_cap_r, -TOP_5, TOP_5, n=160)
+    zones["3PT_RIGHT_WING"] = annulus_sector_polygon(THREE_ARC_R, outer_cap_r, TOP_5, WING_5, n=140)
 
     return zones
 
 
-def zone_label_position(zone_name):
+def zone_label_position(zone_name: str) -> tuple[float, float]:
+    """Return the (x, y) court position at which to centre the label for a given zone."""
     positions = {
         "LOWMID_LEFT":           (-1.7, 2.7),
         "LOWMID_CENTER":         (0.0,  3.1),
@@ -226,7 +264,12 @@ def zone_label_position(zone_name):
 # Matplotlib court drawing
 # ---------------------------------------------------------------------------
 
-def zone_fill_color(pct):
+def zone_fill_color(pct: float | None) -> tuple[float, float, float, float]:
+    """Return an RGBA fill colour for a zone based on its field-goal percentage.
+
+    Colour scale: red (< 30 %) → amber (30–44 %) → yellow (45–64 %) → green (≥ 65 %).
+    Returns a neutral grey when pct is None (zone has no attempts).
+    """
     if pct is None:
         return (0.95, 0.95, 0.95, 0.35)
     if pct < 30:
@@ -238,12 +281,25 @@ def zone_fill_color(pct):
     return (0.72, 0.90, 0.72, 0.68)
 
 
-def add_filled_zone(ax, pts, color):
+def add_filled_zone(
+    ax: plt.Axes,
+    pts: list[tuple[float, float]],
+    color: tuple[float, float, float, float],
+) -> None:
+    """Add a filled polygon patch for a single court zone to ax."""
     poly = Polygon(pts, closed=True, facecolor=color, edgecolor="none", zorder=0)
     ax.add_patch(poly)
 
 
-def _ray(ax, phi, r1, r2, color, lw):
+def _ray(
+    ax: plt.Axes,
+    phi: float,
+    r1: float,
+    r2: float,
+    color: tuple,
+    lw: float,
+) -> None:
+    """Draw a radial line segment at angle φ° from radius r1 to r2."""
     rad = math.radians(phi)
     ax.plot(
         [r1 * math.sin(rad), r2 * math.sin(rad)],
@@ -252,14 +308,16 @@ def _ray(ax, phi, r1, r2, color, lw):
     )
 
 
-def draw_angle_lines(ax, rmax=9.5):
+def draw_angle_lines(ax: plt.Axes, rmax: float = 9.5) -> None:
+    """Draw the radial zone-boundary lines onto ax."""
     for a in (-TOP_3, TOP_3):
         _ray(ax, a, 0.0, LOWMID_R, ZONE_LINE_COLOR, ZONE_LW)
     for a in (-WING_5, -TOP_5, TOP_5, WING_5):
         _ray(ax, a, LOWMID_R, rmax, ZONE_LINE_COLOR, ZONE_LW)
 
 
-def draw_base_court(ax):
+def draw_base_court(ax: plt.Axes) -> None:
+    """Draw FIBA half-court markings and zone overlays onto ax."""
     ax.plot([-HALF_W, HALF_W], [Y_MIN, Y_MIN], color=COURT_COLOR, lw=COURT_LW)
     ax.plot([-HALF_W, -HALF_W], [Y_MIN, Y_MAX], color=COURT_COLOR, lw=COURT_LW)
     ax.plot([HALF_W,  HALF_W],  [Y_MIN, Y_MAX], color=COURT_COLOR, lw=COURT_LW)
@@ -276,7 +334,7 @@ def draw_base_court(ax):
         color=COURT_COLOR, lw=COURT_LW,
     ))
 
-    ax.plot([CORNER_3_X,  CORNER_3_X],  [Y_MIN, CORNER_3_Y_INT],
+    ax.plot([ CORNER_3_X,  CORNER_3_X], [Y_MIN, CORNER_3_Y_INT],
             color=COURT_COLOR, lw=COURT_LW)
     ax.plot([-CORNER_3_X, -CORNER_3_X], [Y_MIN, CORNER_3_Y_INT],
             color=COURT_COLOR, lw=COURT_LW)
@@ -306,8 +364,19 @@ def draw_base_court(ax):
 # Zone statistics & shot chart
 # ---------------------------------------------------------------------------
 
-def compute_zone_stats(shots):
-    stats = {z: {"attempts": 0, "made": 0, "pct": None} for z in ZONE_ORDER}
+def compute_zone_stats(shots: list[Shot]) -> dict[str, ZoneStat]:
+    """Aggregate shot attempts and makes by zone.
+
+    Args:
+        shots: List of Shot dicts, each with "zone" and "result" keys.
+
+    Returns:
+        Dict keyed by zone name. Each value has attempts, made, and pct
+        (field-goal percentage 0–100, or None if no attempts recorded).
+    """
+    stats: dict[str, ZoneStat] = {
+        z: ZoneStat(attempts=0, made=0, pct=None) for z in ZONE_ORDER
+    }
 
     for sh in shots:
         z = sh["zone"]
@@ -324,8 +393,19 @@ def compute_zone_stats(shots):
     return stats
 
 
-def plot_auto_chart(player_name, shots):
-    """Render and display a shot chart for *player_name*."""
+def render_shot_chart(player_name: str, shots: list[Shot]) -> plt.Figure:
+    """Render a shot chart for player_name and return the Figure.
+
+    Zones are colour-coded by field-goal percentage (red → green).
+    Individual shots are plotted as circles (makes) or crosses (misses).
+
+    Args:
+        player_name: Name displayed in the chart title.
+        shots:       List of Shot dicts with zone, result, court_xy, and shooter keys.
+
+    Returns:
+        matplotlib Figure; the caller is responsible for showing or saving it.
+    """
     stats = compute_zone_stats(shots)
     zone_polys = build_zone_polygons()
 
@@ -347,7 +427,7 @@ def plot_auto_chart(player_name, shots):
         att  = stats[z]["attempts"]
         made = stats[z]["made"]
         pct  = stats[z]["pct"]
-        pct_txt = "0%" if pct is None else f"{pct:.0f}%"
+        pct_txt = "—" if pct is None else f"{pct:.0f}%"
 
         ax.text(
             x, y, f"{made}/{att}\n{pct_txt}",
@@ -373,5 +453,5 @@ def plot_auto_chart(player_name, shots):
     ax.set_title(title, fontsize=15, fontweight="bold", pad=18)
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+    return fig

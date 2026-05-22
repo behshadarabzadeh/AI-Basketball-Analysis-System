@@ -1,7 +1,4 @@
-"""
-homography_mapping.py
-=====================
-Court homography computation and image-to-court coordinate mapping.
+"""Court homography computation and image-to-court coordinate mapping.
 
 How homography works
 --------------------
@@ -37,8 +34,8 @@ their image-pixel coordinates are passed to compute_homography() to produce H.
 All subsequent lookups (e.g. shooter position at shot release) call
 img_to_court() with the same H.
 
-Usage
------
+Example::
+
     img_pts = np.array([
         [341, 512],   # left FT elbow  (image pixels, clicked by user)
         [698, 511],   # right FT elbow
@@ -51,20 +48,29 @@ Usage
     # → e.g. (0.31, 1.18) metres from the hoop
 """
 
+from __future__ import annotations
+
 import cv2
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+CourtPoint = tuple[float, float]
 
 
 # ---------------------------------------------------------------------------
 # Real-world court anchor positions (metres, hoop at origin)
 # ---------------------------------------------------------------------------
 
-_LANE_HALF  = 4.9 / 2.0        # 2.45 m — half the paint width
-_Y_FT_LINE  = -1.575 + 5.8     # 4.225 m — FT line distance from hoop
-_HALF_W     = 15.0 / 2.0       # 7.5 m  — half the court width
-_Y_BASELINE = -1.575           # metres — baseline distance from hoop
+_LANE_HALF  = 4.9 / 2.0          # 2.45 m — half the paint width
+_HALF_W     = 15.0 / 2.0         # 7.5 m  — half the court width
+_Y_BASELINE = -1.575             # m      — baseline distance behind hoop centre
+_Y_FT_LINE  = _Y_BASELINE + 5.8  # 4.225 m — FT line is 5.8 m up-court from baseline
 
-COURT_PTS_4 = np.array([
+COURT_ANCHORS_M = np.array([
     [-_LANE_HALF, _Y_FT_LINE],   # left FT-lane elbow
     [ _LANE_HALF, _Y_FT_LINE],   # right FT-lane elbow
     [-_HALF_W,    _Y_BASELINE],  # left baseline corner
@@ -75,6 +81,10 @@ COURT_PTS_4 = np.array([
 # ---------------------------------------------------------------------------
 # Homography computation
 # ---------------------------------------------------------------------------
+
+# This implementation uses only four manually selected court landmarks
+# to estimate a full court homography from a single fixed camera,
+# avoiding the need for multi-camera calibration systems.
 
 def compute_homography(img_pts: np.ndarray) -> np.ndarray:
     """Compute a 3×3 homography matrix mapping image pixels to court metres.
@@ -118,7 +128,8 @@ def compute_homography(img_pts: np.ndarray) -> np.ndarray:
             "Provide exactly four (x, y) image-pixel coordinates."
         )
 
-    H, _ = cv2.findHomography(img_pts, COURT_PTS_4, method=0)
+    # method=0: exact least-squares solve over all four points; no outlier rejection.
+    H, _ = cv2.findHomography(img_pts, COURT_ANCHORS_M, method=0)
 
     if H is None:
         raise RuntimeError(
@@ -133,7 +144,7 @@ def compute_homography(img_pts: np.ndarray) -> np.ndarray:
 # Coordinate transform
 # ---------------------------------------------------------------------------
 
-def img_to_court(pt_xy: tuple, H: np.ndarray) -> tuple:
+def img_to_court(pt_xy: tuple[float, float], H: np.ndarray) -> CourtPoint:
     """Map a single image-space point to court coordinates in metres.
 
     Wraps cv2.perspectiveTransform, which applies H and handles the
