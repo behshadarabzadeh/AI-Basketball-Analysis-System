@@ -110,6 +110,7 @@ Example frame demonstrating multi-player detection, basketball tracking, and vis
 ## Demo
 
 [![Demo Video](https://img.youtube.com/vi/_PusPxBG5RU/maxresdefault.jpg)](https://youtu.be/_PusPxBG5RU)
+> Click the image above to watch the full demo on YouTube.
 
 The demo demonstrates the system operating on a real basketball training session with 5 players and 3 basketballs simultaneously on court.
 
