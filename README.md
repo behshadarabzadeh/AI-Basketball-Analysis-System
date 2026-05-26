@@ -107,6 +107,59 @@ Example frame demonstrating multi-player detection, basketball tracking, and vis
 
 ---
 
+## Demo
+
+[![Demo Video](https://img.youtube.com/vi/_PusPxBG5RU/maxresdefault.jpg)](https://youtu.be/_PusPxBG5RU)
+
+The demo demonstrates the system operating on a real basketball training session with 5 players and 3 basketballs simultaneously on court.
+
+The video shows multi-player tracking with per-player identity labels, multi-ball tracking across the full court, and real-time shot detection with make/miss classification.
+
+---
+
+# System Initialisation
+
+Before processing begins, the system performs a structured interactive calibration sequence. All inputs are provided through an OpenCV GUI at runtime — no configuration files are required.
+
+## Step 1 — Player Registration
+
+The user specifies the number of players to track. For each player, a name is entered via terminal input.
+
+The user then draws a bounding box around each player on the first video frame using `cv2.selectROI`. This provides the initial spatial position for each player track.
+
+## Step 2 — Bib (Jersey) Colour Reference
+
+For each registered player, the user navigates to a suitable frame using keyboard controls (`N` / `B` to jump forward or backward by 50 frames) and draws a bounding box around the player's jersey.
+
+The system extracts an HSV colour reference from this region, computing a circular mean hue and a normalised colour histogram. This reference is used throughout the video to re-identify each player using colour-weighted assignment scoring.
+
+## Step 3 — Rim Calibration
+
+The user clicks two points on the target rim in the first video frame to define the rim line. The rim centre is computed as the midpoint and is used as the spatial anchor for shot detection, ball trajectory analysis, and near-rim tracking behaviour.
+
+Manual rim input is required because indoor sports facilities in the UK commonly have multiple basketball hoops visible within a single camera frame. Automatic rim detection cannot reliably distinguish the target hoop from the side hoops in these environments.
+
+## Step 4 — Net ROI Selection
+
+The user draws a bounding box around the basket net using `cv2.selectROI`. This region is used exclusively for net motion analysis during make/miss classification. The ball bounding box is dynamically excluded from this region during motion computation to prevent false motion readings caused by the ball itself.
+
+Manual net selection is required for the same reason as rim calibration. With multiple hoops visible in the frame, automatic net detection cannot reliably isolate the correct net region from a single camera view.
+
+## Step 5 — Court Homography Calibration
+
+The user provides five spatial references to compute a perspective homography mapping image pixels to real-world court coordinates (metres):
+
+- **2 point clicks** — left elbow and right elbow (lane corners at the free-throw line)
+- **3 line drawings** — left sideline, right sideline, and baseline (two clicks per line)
+
+Manual calibration is required because automatic court detection is not reliable in UK indoor sports facilities, where courts share floor space with multiple other sports. Standard court detection algorithms trained on clean basketball markings fail in these environments due to the high density of overlapping lines from different sports.
+
+The baseline corner points are not clicked directly. In single-camera setups, the far baseline corners are typically at the edge of the frame or partially occluded, making direct point selection inaccurate. Instead, the user draws the left sideline, right sideline, and baseline as independent lines. The system computes each baseline corner by analytically intersecting the corresponding sideline and baseline vectors, eliminating the positional error that would result from direct corner selection at distance.
+
+The four resulting image points are matched against known real-world court coordinates using `cv2.findHomography` with an exact 4-point solve (no RANSAC). The resulting homography matrix `H` is used throughout processing to convert any image-space coordinate to a real court position in metres, which is then used for shot zone classification and shot chart generation.
+
+---
+
 # System Architecture
 
 The system combines computer vision, object tracking, and spatial analysis techniques to process real basketball training sessions captured using a single-camera setup.
