@@ -105,16 +105,7 @@ The system generates zone-based shooting analytics and performance visualisation
 
 Example frame demonstrating multi-player detection, basketball tracking, and visual overlays during a real basketball training session.
 
----
 
-## Demo
-
-[![Demo Video](https://img.youtube.com/vi/_PusPxBG5RU/maxresdefault.jpg)](https://youtu.be/_PusPxBG5RU)
-> Click the image above to watch the full demo on YouTube.
-
-The demo demonstrates the system operating on a real basketball training session with 5 players and 3 basketballs simultaneously on court.
-
-The video shows multi-player tracking with per-player identity labels, multi-ball tracking across the full court, and real-time shot detection with make/miss classification.
 
 ---
 
