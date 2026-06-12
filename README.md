@@ -141,10 +141,8 @@ The user clicks two points on the target rim in the first video frame to define 
 Manual rim input is required because indoor sports facilities in the UK commonly have multiple basketball hoops visible within a single camera frame. Automatic rim detection cannot reliably distinguish the target hoop from the side hoops in these environments.
 
 ## Step 4 — Net ROI Selection
-
-The user draws a bounding box around the basket net using `cv2.selectROI`. This region is used exclusively for net motion analysis during make/miss classification. The ball bounding box is dynamically excluded from this region during motion computation to prevent false motion readings caused by the ball itself.
-
-Manual net selection is required for the same reason as rim calibration. With multiple hoops visible in the frame, automatic net detection cannot reliably isolate the correct net region from a single camera view.
+The user specifies the net height by clicking a single point on the net region. The system automatically computes the net bounding box from this input, combined with the previously defined rim centre and rim line geometry. This region is used exclusively for net motion analysis during make/miss classification. The ball bounding box is dynamically excluded from this region during motion computation to prevent false motion readings caused by the ball itself.
+Manual net height input is required for the same reason as rim calibration. With multiple hoops visible in the frame, automatic net detection cannot reliably isolate the correct net region from a single camera view.
 
 ## Step 5 — Court Homography Calibration
 
