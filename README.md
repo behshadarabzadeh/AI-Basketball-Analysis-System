@@ -254,3 +254,26 @@ Due to ongoing commercial development, selected implementation details, trained 
 This repository contains selected demonstration components and documentation of the project.
 
 Some production-level modules, datasets, trained weights, and internal analytics logic are excluded from the public repository.
+
+---
+
+## License
+
+Copyright © 2025–2026 Behshad Arabzadeh. All Rights Reserved.
+
+This repository is provided for portfolio, demonstration, and evaluation purposes
+only. You may view, clone, and reference the code for educational and
+non-commercial purposes. Commercial use, redistribution, sublicensing, resale, or
+deployment is prohibited without prior written permission.
+
+See the full [LICENSE](https://github.com/behshadarabzadeh/AI-Basketball-Analysis-System-/blob/main/LICENSE) for complete terms.
+
+---
+
+## Author
+
+**Behshad Arabzadeh** — Founder, SportsVision AI
+
+Designed, developed, and built end-to-end by the author.
+
+GitHub: [@behshadarabzadeh](https://github.com/behshadarabzadeh)
