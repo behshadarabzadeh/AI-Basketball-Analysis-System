@@ -22,7 +22,6 @@ The system is currently being developed and used through real basketball trainin
 
 # Key Features
 ## Detection
-پ
 ### Multi-player Detection
 
 The system detects and tracks multiple players simultaneously during dynamic
