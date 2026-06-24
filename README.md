@@ -23,13 +23,32 @@ The system is currently being developed and used through real basketball trainin
 # Key Features
 
 ## Detection
-
+پ
 ### Multi-player Detection
-The system is capable of detecting and tracking multiple players simultaneously during dynamic basketball training sessions.
+
+The system detects and tracks multiple players simultaneously during dynamic
+basketball training sessions. To keep players reliably distinguished in a busy,
+fast-moving scene, it uses **coloured training bibs as a per-player identifier**.
+Distinctly coloured bibs are already standard equipment at most clubs, and where
+they are not, they are inexpensive to obtain. Using bib colour as an identity cue
+makes simultaneous multi-player detection and tracking substantially more
+reliable, helping the system maintain each player's identity even when players
+cross paths or partially occlude one another.
 
 ### Basketball Tracking
-Custom basketball tracking logic is used to track multiple basketballs during dynamic multi-player basketball training sessions.
 
+Custom basketball tracking logic tracks multiple basketballs simultaneously
+throughout dynamic, multi-player training sessions. Detection is driven by a
+**custom-trained YOLOv8n model** built on a manually labelled dataset, which keeps
+ball detection reliable under real gym conditions — varied lighting, multiple
+players in frame, and changing ball visibility.
+
+The trained model is deliberately lightweight: a fused architecture of 73 layers
+and roughly 3.0 million parameters at 8.1 GFLOPs, so it runs efficiently without
+specialised hardware. Evaluated on a held-out validation set of **310 images**
+containing **474 labelled ball instances**, it reaches a precision of **0.90**,
+recall of **0.895**, **mAP@0.5 of 0.925**, and **mAP@0.5:0.95 of 0.434** — strong,
+consistent detection on real, varied gym footage rather than a clean benchmark.
 ---
 
 ## Analytics
