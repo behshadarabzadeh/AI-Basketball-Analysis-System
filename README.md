@@ -39,16 +39,29 @@ cross paths or partially occlude one another.
 
 Custom basketball tracking logic tracks multiple basketballs simultaneously
 throughout dynamic, multi-player training sessions. Detection is driven by a
-**custom-trained YOLOv8n model** built on a manually labelled dataset, which keeps
-ball detection reliable under real gym conditions — varied lighting, multiple
-players in frame, and changing ball visibility.
+custom-trained YOLOv8n model built on a manually labelled dataset, which keeps
+ball detection reliable under real gym conditions, including varied lighting,
+multiple players in frame, and changing ball visibility.
 
-The trained model is deliberately lightweight: a fused architecture of 73 layers
-and roughly 3.0 million parameters at 8.1 GFLOPs, so it runs efficiently without
-specialised hardware. Evaluated on a held-out validation set of **310 images**
-containing **474 labelled ball instances**, it reaches a precision of **0.90**,
-recall of **0.895**, **mAP@0.5 of 0.925**, and **mAP@0.5:0.95 of 0.434** — strong,
-consistent detection on real, varied gym footage rather than a clean benchmark.
+The trained model is deliberately lightweight, consisting of a fused architecture
+with 73 layers, approximately 3.0 million parameters, and 8.1 GFLOPs, allowing
+it to run efficiently without specialised hardware.
+
+The model was evaluated on a held-out validation set of 310 images containing
+474 manually labelled basketball instances. Performance metrics achieved were:
+
+• Precision: 0.900
+• Recall: 0.895
+• mAP@0.50: 0.925
+• mAP@0.50:0.95: 0.434
+
+These results demonstrate strong and consistent basketball detection performance
+across real-world training environments rather than controlled benchmark datasets.
+
+<h3>Basketball Detection Model Performance</h3>
+
+<img src="screenshots/best pt.png" width="900">
+
 ---
 
 ## Analytics
