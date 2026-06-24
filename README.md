@@ -64,7 +64,7 @@ for this project.
 
 <h3>Basketball Detection Model Performance</h3>
 
-<img src="screenshots/best pt.png" width="900">
+<img src="screenshots/best_pt.png" width="900">
 
 These results reflect performance on real, varied training footage rather than a
 clean benchmark.
