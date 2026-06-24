@@ -252,7 +252,10 @@ The project is currently being developed as an AI-powered sports analytics solut
 
 The system is currently being used and commercially deployed across multiple grassroots basketball clubs in London as part of ongoing real-world development.
 
-Due to ongoing commercial development, selected implementation details, trained models, and proprietary analytics logic are intentionally kept private.
+While selected architecture and calibration methods are documented here for
+demonstration, the trained models, datasets, and certain proprietary analytics
+components — including the shooter-assignment logic — are intentionally kept
+private due to ongoing commercial development.
 
 ---
 
@@ -260,7 +263,9 @@ Due to ongoing commercial development, selected implementation details, trained 
 
 This repository contains selected demonstration components and documentation of the project.
 
-Some production-level modules, datasets, trained weights, and internal analytics logic are excluded from the public repository.
+The trained weights, datasets, and certain internal analytics modules — including
+the shooter-assignment logic — are excluded from the public repository, while
+selected architecture and calibration details are shared here for demonstration.
 
 ---
 
