@@ -202,6 +202,13 @@ Manual calibration is required because automatic court detection is not reliable
 The baseline corner points are not clicked directly. In single-camera setups, the far baseline corners are typically at the edge of the frame or partially occluded, making direct point selection inaccurate. Instead, the user draws the left sideline, right sideline, and baseline as independent lines. The system computes each baseline corner by analytically intersecting the corresponding sideline and baseline vectors, eliminating the positional error that would result from direct corner selection at distance.
 
 The four resulting image points are matched against known real-world court coordinates using `cv2.findHomography` with an exact 4-point solve (no RANSAC). The resulting homography matrix `H` is used throughout processing to convert any image-space coordinate to a real court position in metres, which is then used for shot zone classification and shot chart generation.
+---
+
+## Demo Video
+
+Watch the full system demonstration here:
+
+▶️ https://www.youtube.com/watch?v=tfaVmRRfAWo
 
 ---
 
