@@ -56,6 +56,7 @@ for this project.
 **Validation results** (held-out set: 310 images, 474 labelled ball instances)
 
 | Metric | Value |
+|---|---|
 | Precision | 0.90 |
 | Recall | 0.895 |
 | mAP@0.5 | 0.925 |
