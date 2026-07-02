@@ -1,167 +1,239 @@
-"""Court homography computation and image-to-court coordinate mapping.
-
-How homography works
---------------------
-A homography is a 3×3 matrix H that encodes a perspective transform between
-two planes — here, the camera image plane and the flat court surface. It is
-computed from four corresponding point pairs: image pixels whose real-world
-court positions (in metres) are known in advance.
-
-Once H is computed, any image pixel (x, y) can be mapped to court metres via
-a homogeneous multiply followed by a perspective divide:
-
-    [X, Y, w]^T = H · [x, y, 1]^T
-    court_xy = (X / w,  Y / w)
-
-cv2.perspectiveTransform handles the divide automatically.
-
-Calibration anchors
--------------------
-Four court landmarks with fixed real-world positions are used as anchors:
-
-    Anchor                  Court position (metres)
-    ----------------------  -----------------------
-    Left FT-lane elbow      (-2.45,  4.225)
-    Right FT-lane elbow     ( 2.45,  4.225)
-    Left baseline corner    (-7.5,  -1.575)
-    Right baseline corner   ( 7.5,  -1.575)
-
-Coordinate system: origin at the hoop centre, X increases left→right,
-Y increases toward half-court.
-
-The user clicks these four points in the video frame once per session;
-their image-pixel coordinates are passed to compute_homography() to produce H.
-All subsequent lookups (e.g. shooter position at shot release) call
-img_to_court() with the same H.
-
-Example::
-
-    img_pts = np.array([
-        [341, 512],   # left FT elbow  (image pixels, clicked by user)
-        [698, 511],   # right FT elbow
-        [ 87, 731],   # left baseline corner
-        [952, 729],   # right baseline corner
-    ], dtype=np.float32)
-
-    H = compute_homography(img_pts)
-    court_xy = img_to_court((520, 640), H)
-    # → e.g. (0.31, 1.18) metres from the hoop
 """
+Camera-to-court coordinate mapping via a 4-point planar homography.
 
-from __future__ import annotations
+Given four image-space reference points (two free-throw-lane elbows plus the
+two baseline sideline corners, the latter derived from three user-drawn
+lines) and their known real-world court coordinates, this module solves for
+the homography that maps any pixel in the camera view onto court-space
+metres. It only covers geometry: the interactive point/line collection UI,
+the homography solve, and the point transform. It does not include the
+broader video pipeline (frame capture, detection model inference, tracking)
+that supplies frames to this calibration step in the private system.
+"""
 
 import cv2
 import numpy as np
 
-
-# ---------------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------------
-
-CourtPoint = tuple[float, float]
+from config import (
+    MAX_DISPLAY_W, MAX_DISPLAY_H,
+    POINT_CLICK_NAMES, LINE_CLICK_NAMES, COURT_PTS_4,
+)
 
 
-# ---------------------------------------------------------------------------
-# Real-world court anchor positions (metres, hoop at origin)
-# ---------------------------------------------------------------------------
-
-_LANE_HALF  = 4.9 / 2.0          # 2.45 m — half the paint width
-_HALF_W     = 15.0 / 2.0         # 7.5 m  — half the court width
-_Y_BASELINE = -1.575             # m      — baseline distance behind hoop centre
-_Y_FT_LINE  = _Y_BASELINE + 5.8  # 4.225 m — FT line is 5.8 m up-court from baseline
-
-COURT_ANCHORS_M = np.array([
-    [-_LANE_HALF, _Y_FT_LINE],   # left FT-lane elbow
-    [ _LANE_HALF, _Y_FT_LINE],   # right FT-lane elbow
-    [-_HALF_W,    _Y_BASELINE],  # left baseline corner
-    [ _HALF_W,    _Y_BASELINE],  # right baseline corner
-], dtype=np.float32)
+def fit_to_screen(frame_bgr, max_w=MAX_DISPLAY_W, max_h=MAX_DISPLAY_H):
+    h, w = frame_bgr.shape[:2]
+    s = min(max_w / w, max_h / h, 1.0)
+    if s < 1.0:
+        disp = cv2.resize(frame_bgr, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
+    else:
+        disp = frame_bgr.copy()
+    return disp, s
 
 
-# ---------------------------------------------------------------------------
-# Homography computation
-# ---------------------------------------------------------------------------
+def line_intersection(p1, p2, p3, p4):
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+    x4, y4 = p4
 
-# This implementation uses only four manually selected court landmarks
-# to estimate a full court homography from a single fixed camera,
-# avoiding the need for multi-camera calibration systems.
+    den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
 
-def compute_homography(img_pts: np.ndarray) -> np.ndarray:
-    """Compute a 3×3 homography matrix mapping image pixels to court metres.
+    if abs(den) < 1e-9:
+        raise RuntimeError("Selected lines are nearly parallel. Please recalibrate.")
 
-    Calls cv2.findHomography with an exact 4-point solve (method=0, no RANSAC)
-    to find H such that for every anchor i:
+    px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den
+    py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den
 
-        court_pts[i]  ≈  perspective_divide(H · img_pts[i])
-
-    Args:
-        img_pts: (4, 2) float32 array of image-pixel coordinates for the four
-                 calibration anchors, in this exact order:
-                   [0] left FT-lane elbow
-                   [1] right FT-lane elbow
-                   [2] left baseline corner
-                   [3] right baseline corner
-
-    Returns:
-        H: (3, 3) float64 homography matrix.
-
-    Raises:
-        ValueError:   If img_pts does not have shape (4, 2).
-        RuntimeError: If cv2.findHomography fails (collinear or degenerate
-                      point configuration).
-
-    Example::
-
-        img_pts = np.array([
-            [341, 512],
-            [698, 511],
-            [ 87, 731],
-            [952, 729],
-        ], dtype=np.float32)
-
-        H = compute_homography(img_pts)
-    """
-    img_pts = np.asarray(img_pts, dtype=np.float32)
-    if img_pts.shape != (4, 2):
-        raise ValueError(
-            f"img_pts must have shape (4, 2), got {img_pts.shape}. "
-            "Provide exactly four (x, y) image-pixel coordinates."
-        )
-
-    # method=0: exact least-squares solve over all four points; no outlier rejection.
-    H, _ = cv2.findHomography(img_pts, COURT_ANCHORS_M, method=0)
-
-    if H is None:
-        raise RuntimeError(
-            "cv2.findHomography returned None. Ensure the four anchor points "
-            "are not collinear and correspond to the correct court landmarks."
-        )
-
-    return H
+    return float(px), float(py)
 
 
-# ---------------------------------------------------------------------------
-# Coordinate transform
-# ---------------------------------------------------------------------------
+def line_points_to_border_points(p1, p2, w, h):
+    x1, y1 = p1
+    x2, y2 = p2
 
-def img_to_court(pt_xy: tuple[float, float], H: np.ndarray) -> CourtPoint:
-    """Map a single image-space point to court coordinates in metres.
+    candidates = []
 
-    Wraps cv2.perspectiveTransform, which applies H and handles the
-    homogeneous divide in one call.
+    if abs(x2 - x1) > 1e-9:
+        t = (0 - x1) / (x2 - x1)
+        y = y1 + t * (y2 - y1)
+        if 0 <= y <= h - 1:
+            candidates.append((0, y))
 
-    Args:
-        pt_xy: (x, y) point in image pixels.
-        H:     (3, 3) homography matrix from compute_homography().
+        t = ((w - 1) - x1) / (x2 - x1)
+        y = y1 + t * (y2 - y1)
+        if 0 <= y <= h - 1:
+            candidates.append((w - 1, y))
 
-    Returns:
-        (x_court, y_court) in metres, with the hoop at the origin.
+    if abs(y2 - y1) > 1e-9:
+        t = (0 - y1) / (y2 - y1)
+        x = x1 + t * (x2 - x1)
+        if 0 <= x <= w - 1:
+            candidates.append((x, 0))
 
-    Example::
+        t = ((h - 1) - y1) / (y2 - y1)
+        x = x1 + t * (x2 - x1)
+        if 0 <= x <= w - 1:
+            candidates.append((x, h - 1))
 
-        court_xy = img_to_court((520, 640), H)
-        # → (0.31, 1.18)
-    """
+    uniq = []
+    for pt in candidates:
+        if not any(abs(pt[0] - q[0]) < 1e-6 and abs(pt[1] - q[1]) < 1e-6 for q in uniq):
+            uniq.append(pt)
+
+    if len(uniq) < 2:
+        return p1, p2
+
+    best_pair = (uniq[0], uniq[1])
+    best_d = -1
+
+    for i in range(len(uniq)):
+        for j in range(i + 1, len(uniq)):
+            d = (uniq[i][0] - uniq[j][0]) ** 2 + (uniq[i][1] - uniq[j][1]) ** 2
+            if d > best_d:
+                best_d = d
+                best_pair = (uniq[i], uniq[j])
+
+    return best_pair
+
+
+_clicked_points = []
+_clicked_lines = []
+_calib_scale = 1.0
+_current_line_points = []
+
+
+def _mouse_cb_calib(event, x, y, flags, param):
+    global _clicked_points, _clicked_lines, _calib_scale, _current_line_points
+
+    if event == cv2.EVENT_LBUTTONDOWN:
+        ox = float(x) / _calib_scale
+        oy = float(y) / _calib_scale
+
+        if len(_clicked_points) < 2:
+            _clicked_points.append((ox, oy))
+            return
+
+        _current_line_points.append((ox, oy))
+
+        if len(_current_line_points) == 2:
+            _clicked_lines.append((_current_line_points[0], _current_line_points[1]))
+            _current_line_points = []
+
+
+def calibrate_homography(first_frame_bgr):
+    global _clicked_points, _clicked_lines, _calib_scale, _current_line_points
+
+    _clicked_points = []
+    _clicked_lines = []
+    _current_line_points = []
+
+    win = "COURT HOMOGRAPHY CALIBRATION"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(win, _mouse_cb_calib)
+
+    while True:
+        disp, s = fit_to_screen(first_frame_bgr)
+        _calib_scale = s
+        vis = disp.copy()
+
+        h0, w0 = first_frame_bgr.shape[:2]
+
+        if len(_clicked_points) < 2:
+            msg = f"Click point: {POINT_CLICK_NAMES[len(_clicked_points)]} ({len(_clicked_points)}/2)"
+        elif len(_clicked_lines) < 3:
+            line_idx = len(_clicked_lines)
+            if len(_current_line_points) == 0:
+                msg = f"Draw line: {LINE_CLICK_NAMES[line_idx]} | click point 1"
+            else:
+                msg = f"Draw line: {LINE_CLICK_NAMES[line_idx]} | click point 2"
+        else:
+            msg = "ENTER=confirm | R=reset"
+
+        cv2.putText(vis, msg, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+
+        for i, (cx, cy) in enumerate(_clicked_points):
+            dx = int(cx * _calib_scale)
+            dy = int(cy * _calib_scale)
+            cv2.circle(vis, (dx, dy), 6, (0, 255, 255), -1)
+            cv2.putText(vis, f"P{i+1}", (dx + 8, dy - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+
+        for i, (p1, p2) in enumerate(_clicked_lines):
+            q1, q2 = line_points_to_border_points(p1, p2, w0, h0)
+            a = (int(q1[0] * _calib_scale), int(q1[1] * _calib_scale))
+            b = (int(q2[0] * _calib_scale), int(q2[1] * _calib_scale))
+            cv2.line(vis, a, b, (0, 200, 255), 2)
+            cv2.putText(vis, f"L{i+1}", (int((a[0] + b[0]) / 2), int((a[1] + b[1]) / 2)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
+
+        for i, (cx, cy) in enumerate(_current_line_points):
+            dx = int(cx * _calib_scale)
+            dy = int(cy * _calib_scale)
+            cv2.circle(vis, (dx, dy), 5, (255, 180, 0), -1)
+            cv2.putText(vis, f"{i+1}", (dx + 8, dy - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 180, 0), 2)
+
+        if len(_clicked_lines) == 3:
+            try:
+                left_corner_img = line_intersection(
+                    _clicked_lines[0][0], _clicked_lines[0][1],
+                    _clicked_lines[2][0], _clicked_lines[2][1]
+                )
+                right_corner_img = line_intersection(
+                    _clicked_lines[1][0], _clicked_lines[1][1],
+                    _clicked_lines[2][0], _clicked_lines[2][1]
+                )
+
+                for name, pt in [("LC", left_corner_img), ("RC", right_corner_img)]:
+                    dx = int(pt[0] * _calib_scale)
+                    dy = int(pt[1] * _calib_scale)
+                    cv2.circle(vis, (dx, dy), 7, (0, 0, 255), -1)
+                    cv2.putText(vis, name, (dx + 8, dy - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            except Exception:
+                pass
+
+        cv2.imshow(win, vis)
+        k = cv2.waitKey(10) & 0xFF
+
+        if k in (ord("r"), ord("R")):
+            _clicked_points = []
+            _clicked_lines = []
+            _current_line_points = []
+        elif k in (13, 10):
+            if len(_clicked_points) == 2 and len(_clicked_lines) == 3 and len(_current_line_points) == 0:
+                break
+        elif k == 27:
+            cv2.destroyWindow(win)
+            raise RuntimeError("Calibration cancelled.")
+
+    cv2.destroyWindow(win)
+
+    left_corner_img = line_intersection(
+        _clicked_lines[0][0], _clicked_lines[0][1],
+        _clicked_lines[2][0], _clicked_lines[2][1]
+    )
+    right_corner_img = line_intersection(
+        _clicked_lines[1][0], _clicked_lines[1][1],
+        _clicked_lines[2][0], _clicked_lines[2][1]
+    )
+
+    img_pts_4 = np.array([
+        _clicked_points[0],
+        _clicked_points[1],
+        left_corner_img,
+        right_corner_img,
+    ], dtype=np.float32)
+
+    H_img2court, _ = cv2.findHomography(img_pts_4, COURT_PTS_4, method=0)
+
+    if H_img2court is None:
+        raise RuntimeError("Homography failed.")
+
+    return H_img2court
+
+
+def img_to_court(pt_xy, H_img2court):
     arr = np.array([[pt_xy]], dtype=np.float32)
-    out = cv2.perspectiveTransform(arr, H).reshape(2)
+    out = cv2.perspectiveTransform(arr, H_img2court).reshape(2,)
     return float(out[0]), float(out[1])
