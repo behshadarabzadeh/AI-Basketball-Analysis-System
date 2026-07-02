@@ -1,52 +1,42 @@
-"""Dual-validation make/miss classifier for basketball shot detection."""
+"""
+Shot outcome (make/miss) classification once a ball is already descending
+near the rim.
 
-from __future__ import annotations
+Given a stream of ball centre positions relative to the rim line, plus a
+frame-differencing motion signal from a fixed net region of interest, this
+module decides whether a shot went in: it records the last position seen
+above the rim line and the first position seen below it, waits a short
+window, and checks whether enough net motion occurred to confirm a make.
 
-from typing import TypedDict
+Deliberately excluded: the upward-plus-toward-rim velocity heuristic that
+first decides a ball is being shot at all, and any attribution of a shot to
+a specific player. Both belong to a separate private workflow that hands a
+ball to this classifier only after it has already decided a shot attempt is
+under way.
+"""
+
+import math
 
 import cv2
 import numpy as np
 
-
-class ShotResult(TypedDict):
-    result: str             # "MAKE" or "MISS"
-    rim_crossing_ok: bool   # True if the rim crossing check passed
-    net_motion_ok: bool     # True if the net-motion check passed (or was skipped)
-    sum_dist: float | None  # last_above_dist + first_below_dist, or None
-    net_motion_max: float   # peak net-motion score
+from config import (
+    RIM_ABOVE_MARGIN_PX, RIM_BELOW_MARGIN_PX, MAKE_SUM_DIST_MAX_PX,
+    USE_NET_MOTION_FOR_MAKE, NET_CHECK_AFTER_BELOW_FRAMES,
+    NET_MOTION_THRESHOLD, NET_DIFF_THRESHOLD,
+)
 
 
-def compute_net_motion(
-    prev_frame: np.ndarray,
-    curr_frame: np.ndarray,
-    net_box: tuple[int, int, int, int],
-    net_diff_threshold: int,
-    ball_box: tuple[float, float, float, float] | None = None,
-) -> float:
-    """Estimate the fraction of net pixels that changed between two frames.
+def euclidean(p1, p2):
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-    Crops both frames to the net ROI, computes a per-pixel absolute difference,
-    binarises the result, and returns the ratio of changed pixels to total valid
-    pixels. The ball region is optionally masked out so only net-fabric ripple
-    is measured, not the ball itself moving through the ROI.
 
-    Args:
-        prev_frame:         BGR image from the previous frame (H × W × 3, uint8).
-        curr_frame:         BGR image from the current frame (H × W × 3, uint8).
-        net_box:            Net ROI as (x1, y1, x2, y2) in image-pixel coordinates.
-        net_diff_threshold: Per-pixel absolute-difference threshold for binarising
-                            the grayscale frame-diff. Suppresses sensor noise.
-        ball_box:           Optional ball bounding box (x1, y1, x2, y2). Its overlap
-                            with the net ROI is zeroed so ball pixels are ignored.
-
-    Returns:
-        Float in [0.0, 1.0]. Returns 0.0 when either frame is None, the ROI
-        is empty, or no valid pixels remain after masking.
-    """
+def compute_net_motion(prev_frame, curr_frame, net_box, ball_box=None):
     if prev_frame is None or curr_frame is None or net_box is None:
         return 0.0
 
     x1, y1, x2, y2 = net_box
+
     prev_roi = prev_frame[y1:y2, x1:x2]
     curr_roi = curr_frame[y1:y2, x1:x2]
 
@@ -57,85 +47,109 @@ def compute_net_motion(
     curr_gray = cv2.cvtColor(curr_roi, cv2.COLOR_BGR2GRAY)
 
     diff = cv2.absdiff(prev_gray, curr_gray)
-    _, thresh = cv2.threshold(diff, net_diff_threshold, 255, cv2.THRESH_BINARY)
+    _, thresh = cv2.threshold(diff, NET_DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
 
     mask = np.ones(thresh.shape, dtype=np.uint8) * 255
 
     if ball_box is not None:
-        bx1, by1, bx2, by2 = (int(v) for v in ball_box)
+        bx1, by1, bx2, by2 = map(int, ball_box)
+
         mx1 = max(0, bx1 - x1)
         my1 = max(0, by1 - y1)
         mx2 = min(x2 - x1, bx2 - x1)
         my2 = min(y2 - y1, by2 - y1)
+
         if mx2 > mx1 and my2 > my1:
             mask[my1:my2, mx1:mx2] = 0
 
     valid_pixels = cv2.countNonZero(mask)
-    if valid_pixels == 0:
+    if valid_pixels <= 0:
         return 0.0
 
     motion_pixels = cv2.countNonZero(cv2.bitwise_and(thresh, thresh, mask=mask))
     return motion_pixels / valid_pixels
 
 
-def evaluate_make_miss(
-    last_above_dist: float | None,
-    first_below_dist: float | None,
-    net_motion_max: float,
-    make_sum_dist_max_px: float,
-    net_motion_threshold: float,
-    use_net_motion: bool,
-) -> ShotResult:
-    """Apply the dual-validation rule and return a labelled result.
-
-    Dual-validation logic
-    ---------------------
-    A shot is a MAKE if and only if both checks pass:
-
-    Check 1 — Rim crossing validation
-        last_above_dist + first_below_dist <= make_sum_dist_max_px
-
-        last_above_dist is the Euclidean distance (px) from the ball centre to
-        the rim centre at the last frame the ball was above the rim plane.
-        first_below_dist is the same measurement for the first frame the ball
-        dropped below. Their sum is small when the ball passes directly through
-        the rim and large when it arcs wide or clangs off the backboard.
-
-    Check 2 — Net motion  (optional, controlled by use_net_motion)
-        net_motion_max >= net_motion_threshold
-
-        The peak frame-diff score recorded over the observation window must
-        exceed the threshold. When use_net_motion is False this check always
-        passes, making geometry the sole arbiter.
-
-    Args:
-        last_above_dist:      Rim distance (px) at the last above-rim frame.
-                              None if never observed.
-        first_below_dist:     Rim distance (px) at the first below-rim frame.
-                              None if descent was not captured.
-        net_motion_max:       Peak net-motion fraction from compute_net_motion
-                              calls over the observation window.
-        make_sum_dist_max_px: Max allowed sum of distances (px) for a MAKE.
-        net_motion_threshold: Minimum net-motion fraction required for a MAKE.
-        use_net_motion:       If False, the net-motion check always passes.
-
-    Returns:
-        ShotResult with keys: result, rim_crossing_ok, net_motion_ok,
-        sum_dist, net_motion_max.
+class ShotOutcomeTracker:
     """
-    sum_dist = (
-        None
-        if (last_above_dist is None or first_below_dist is None)
-        else last_above_dist + first_below_dist
-    )
+    Tracks one in-flight ball around the rim line and produces a MAKE/MISS
+    verdict. The caller decides when a shot attempt has started (out of
+    scope for this module) and creates one tracker per attempt.
+    """
 
-    rim_crossing_ok = sum_dist is not None and sum_dist <= make_sum_dist_max_px
-    net_motion_ok = net_motion_max >= net_motion_threshold if use_net_motion else True
+    def __init__(self):
+        self.last_above_center = None
+        self.last_above_dist = None
+        self.last_above_frame = None
 
-    return ShotResult(
-        result="MAKE" if (rim_crossing_ok and net_motion_ok) else "MISS",
-        rim_crossing_ok=rim_crossing_ok,
-        net_motion_ok=net_motion_ok,
-        sum_dist=sum_dist,
-        net_motion_max=net_motion_max,
-    )
+        self.first_below_center = None
+        self.first_below_dist = None
+        self.first_below_frame = None
+
+        self.waiting_net_check = False
+        self.net_check_start_frame = None
+        self.net_motion_max = 0.0
+
+    def update(self, frame_idx, ball_center, rim_center):
+        """
+        Feed one frame's ball position. Call this every frame until
+        waiting_net_check becomes True, then switch to check_net_motion().
+        """
+        curr_dist = euclidean(ball_center, rim_center)
+        is_above = ball_center[1] < rim_center[1] - RIM_ABOVE_MARGIN_PX
+        is_below = ball_center[1] > rim_center[1] + RIM_BELOW_MARGIN_PX
+
+        if is_above and not self.waiting_net_check:
+            self.last_above_center = ball_center
+            self.last_above_dist = curr_dist
+            self.last_above_frame = frame_idx
+
+        elif is_below and not self.waiting_net_check:
+            self.first_below_center = ball_center
+            self.first_below_dist = curr_dist
+            self.first_below_frame = frame_idx
+
+            self.waiting_net_check = True
+            self.net_check_start_frame = frame_idx
+            self.net_motion_max = 0.0
+
+    def check_net_motion(self, frame_idx, prev_frame, curr_frame, net_box, ball_box):
+        """
+        Call once per frame while waiting_net_check is True. Returns a
+        result dict once NET_CHECK_AFTER_BELOW_FRAMES have elapsed since the
+        ball first appeared below the rim line, else None.
+        """
+        if not self.waiting_net_check:
+            return None
+
+        net_motion = compute_net_motion(prev_frame, curr_frame, net_box, ball_box=ball_box)
+        self.net_motion_max = max(self.net_motion_max, net_motion)
+
+        if frame_idx - self.net_check_start_frame < NET_CHECK_AFTER_BELOW_FRAMES:
+            return None
+
+        distance_make_ok = (
+            self.last_above_dist is not None and
+            self.first_below_dist is not None and
+            (self.last_above_dist + self.first_below_dist) <= MAKE_SUM_DIST_MAX_PX
+        )
+
+        net_motion_ok = self.net_motion_max >= NET_MOTION_THRESHOLD if USE_NET_MOTION_FOR_MAKE else True
+        result = "MAKE" if distance_make_ok and net_motion_ok else "MISS"
+
+        result_info = {
+            "result": result,
+            "last_above_dist": self.last_above_dist,
+            "first_below_dist": self.first_below_dist,
+            "sum_dist": None if self.last_above_dist is None or self.first_below_dist is None
+            else self.last_above_dist + self.first_below_dist,
+            "net_motion": self.net_motion_max,
+            "net_motion_ok": net_motion_ok,
+            "distance_make_ok": distance_make_ok,
+        }
+
+        self.waiting_net_check = False
+        self.net_check_start_frame = None
+        self.net_motion_max = 0.0
+
+        return result_info
