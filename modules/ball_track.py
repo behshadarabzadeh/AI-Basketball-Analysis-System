@@ -1,7 +1,7 @@
 """
 Ball position tracking across frames: nearest-neighbour matching against a
-constant-velocity prediction, missed-frame aging (with a tighter grace
-period near the rim, where occlusion and fast motion are more common), and
+constant-velocity prediction (with a wider matching radius near the rim,
+where occlusion and fast motion are more common), missed-frame aging, and
 spawning of new tracks for detections that don't match an existing one.
 
 This module takes a plain list of per-frame ball detections (box,
