@@ -6,10 +6,10 @@ spawning of new tracks for detections that don't match an existing one.
 
 This module takes a plain list of per-frame ball detections (box,
 confidence, centre) as input and has no dependency on how those detections
-were produced. The detection model itself, and everything the private system
-does with a tracked ball once acquired (shot-attempt detection, make/miss
-outcome, and possession/player attribution), lives in separate private
-modules and is not part of this file.
+were produced. The detection model itself, along with the shot-attempt
+detection and possession/player-attribution logic, lives in separate
+private modules and is not part of this file. The make/miss outcome logic
+is published separately in make_miss_classifier.py.
 """
 
 import math
