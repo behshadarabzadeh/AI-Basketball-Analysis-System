@@ -356,8 +356,6 @@ def plot_auto_chart(player_name, shots):
         else:
             ax.scatter([x], [y], s=110, marker="x", color="gray", linewidths=2.2, zorder=20)
 
-        ax.text(x + 0.12, y + 0.12, sh["player"], fontsize=7, color="black", zorder=25)
-
     title = f"{player_name} | Shots: {total_attempts} | Made: {total_made} | FG%: {total_pct:.1f}%"
     ax.set_title(title, fontsize=15, fontweight="bold", pad=18)
     ax.set_xlabel("X (m)")
