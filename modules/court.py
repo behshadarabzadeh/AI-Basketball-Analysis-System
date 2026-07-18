@@ -6,9 +6,11 @@ zones (paint / mid-range / three-point, split into corner-wing-top sectors)
 and renders a shot chart with per-zone attempt/make/percentage labels. Shot
 records passed into plot_auto_chart are opaque dicts describing where a shot
 was taken from, who is credited with it, and whether it went in; deciding
-those three things is not this module's job. Attempt detection, player
-attribution, and make/miss classification are separate private subsystems
-that produce the shot records this module only renders.
+those three things is not this module's job. Attempt detection and player
+attribution are handled by private upstream subsystems, while make/miss
+classification is handled by the separately published
+make_miss_classifier.py module. This file only classifies court zones and
+renders the resulting shot records.
 """
 
 import math
@@ -22,6 +24,10 @@ from config import (
     TOP_5, WING_5, TOP_3, COURT_COLOR, COURT_LW, ZONE_LINE_COLOR, ZONE_LW,
     ZONE_ORDER, ZONE_FILL_ORDER,
 )
+
+
+def is_made_result(value):
+    return str(value).strip().upper() == "MAKE"
 
 
 def phi_deg(x, y):
@@ -293,7 +299,7 @@ def compute_zone_stats(shots):
         z = sh["zone"]
         if z in stats:
             stats[z]["attempts"] += 1
-            if sh["result"] == "make":
+            if is_made_result(sh["result"]):
                 stats[z]["made"] += 1
 
     for z in ZONE_ORDER:
@@ -307,14 +313,15 @@ def compute_zone_stats(shots):
 
 def plot_auto_chart(player_name, shots):
     """
-    shots: list of {"player": str, "zone": str, "result": "make"|"miss",
-    "court_xy": (x, y)} records, already resolved upstream.
+    shots: list of {"player": str, "zone": str, "result": "MAKE"|"MISS"
+    (case-insensitive), "court_xy": (x, y)} records, already resolved
+    upstream.
     """
     stats = compute_zone_stats(shots)
     zone_polys = build_zone_polygons()
 
     total_attempts = len(shots)
-    total_made = sum(1 for s in shots if s["result"] == "make")
+    total_made = sum(1 for s in shots if is_made_result(s["result"]))
     total_pct = 100.0 * total_made / total_attempts if total_attempts > 0 else 0.0
 
     fig, ax = plt.subplots(figsize=(11, 10))
@@ -344,7 +351,7 @@ def plot_auto_chart(player_name, shots):
 
     for sh in shots:
         x, y = sh["court_xy"]
-        if sh["result"] == "make":
+        if is_made_result(sh["result"]):
             ax.scatter([x], [y], s=110, marker="o", color="gray", zorder=20)
         else:
             ax.scatter([x], [y], s=110, marker="x", color="gray", linewidths=2.2, zorder=20)
