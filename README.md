@@ -36,8 +36,8 @@ cross paths or partially occlude one another.
 ### Custom-Trained Ball Detection Model
 
 Rather than relying on a generic, off-the-shelf object detector, the system uses a
-basketball detection model trained from scratch on a dataset built specifically
-for this project.
+custom basketball detection model, fine-tuned from the YOLOv8n base architecture
+on a dataset built specifically for this project.
 
 **Dataset**
 - **1,550 images**, personally collected and **manually labelled**
